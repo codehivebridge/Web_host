@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Synapse — Neural Page Transition</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+  :root{
+    --bg:#0A0D16;
+    --bg-2:#0F1420;
+    --cyan:#5EEAD4;
+    --violet:#8B7CF6;
+    --amber:#F5A623;
+    --ink:#E9ECF4;
+    --ink-dim:#7A8299;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{
+    margin:0; padding:0; height:100%;
+    background:var(--bg);
+    font-family:'Inter',sans-serif;
+    color:var(--ink);
+    overflow:hidden;
+  }
+
+  #stage{
+    position:relative;
+    width:100%; height:100vh;
+  }
+
+  /* ---------- NEURAL LOADER LAYER ---------- */
+  #loader{
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    background:
+      radial-gradient(ellipse at 50% 40%, #131A2B 0%, var(--bg) 70%);
+    z-index:10;
+    transition: opacity 0.9s ease, filter 0.9s ease;
+  }
+  #loader.leaving{
+    opacity:0;
+    filter:blur(6px);
+    pointer-events:none;
+  }
+
+  #net-svg{ width:min(680px,90vw); height:min(420px,60vh); }
+
+  .node{
+    fill:var(--bg-2);
+    stroke:var(--ink-dim);
+    stroke-width:1.2;
+    transform-origin:center;
+  }
+  .node.active{
+    fill:var(--cyan);
+    stroke:var(--cyan);
+    filter:drop-shadow(0 0 8px rgba(94,234,212,0.9));
+    animation:pop 0.5s ease;
+  }
+  @keyframes pop{
+    0%{ transform:scale(0.4); opacity:0;}
+    60%{ transform:scale(1.25); opacity:1;}
+    100%{ transform:scale(1); }
+  }
+
+  .edge{
+    stroke:var(--ink-dim);
+    stroke-width:1;
+    opacity:0.25;
+    fill:none;
+  }
+  .pulse{
+    stroke:var(--cyan);
+    stroke-width:2;
+    fill:none;
+    opacity:0;
+    stroke-dasharray:8 500;
+    stroke-dashoffset:0;
+  }
+  .pulse.fire{
+    animation:travel 0.6s cubic-bezier(.4,0,.2,1) forwards;
+  }
+  @keyframes travel{
+    0%{ opacity:1; stroke-dashoffset:500; }
+    85%{ opacity:1; }
+    100%{ opacity:0; stroke-dashoffset:0; }
+  }
+
+  #loader-label{
+    position:absolute;
+    bottom:14%;
+    left:50%; transform:translateX(-50%);
+    font-family:'JetBrains Mono',monospace;
+    font-size:12px;
+    letter-spacing:0.18em;
+    color:var(--ink-dim);
+    text-transform:uppercase;
+  }
+  #loader-label b{ color:var(--cyan); font-weight:500; }
+
+  /* ---------- REVEALED CONTENT LAYER ---------- */
+  #content{
+    position:absolute; inset:0;
+    padding:6vh 7vw;
+    opacity:0;
+    transform:translateY(14px) scale(0.99);
+    z-index:1;
+  }
+  #content.settle{
+    animation:settle 0.9s cubic-bezier(.16,1,.3,1) forwards;
+  }
+  @keyframes settle{
+    0%{ opacity:0; transform:translateY(14px) scale(0.99); filter:blur(4px); }
+    100%{ opacity:1; transform:translateY(0) scale(1); filter:blur(0); }
+  }
+
+  .eyebrow{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;
+    letter-spacing:0.2em;
+    color:var(--violet);
+    text-transform:uppercase;
+    margin:0 0 18px 0;
+  }
+  h1{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:700;
+    font-size:clamp(32px,5vw,56px);
+    line-height:1.05;
+    margin:0 0 20px 0;
+    letter-spacing:-0.01em;
+  }
+  h1 span{ color:var(--cyan); }
+  p.lead{
+    max-width:520px;
+    color:var(--ink-dim);
+    font-size:15px;
+    line-height:1.6;
+    margin:0 0 36px 0;
+  }
+
+  .grid{
+    display:grid;
+    grid-template-columns:repeat(3,1fr);
+    gap:16px;
+    max-width:760px;
+  }
+  .card{
+    border:1px solid rgba(255,255,255,0.08);
+    background:rgba(255,255,255,0.02);
+    border-radius:10px;
+    padding:18px;
+  }
+  .card .n{
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;
+    color:var(--amber);
+    margin-bottom:8px;
+    display:block;
+  }
+  .card h3{
+    font-family:'Space Grotesk',sans-serif;
+    font-size:15px;
+    margin:0 0 6px 0;
+    font-weight:500;
+  }
+  .card p{
+    font-size:12.5px;
+    color:var(--ink-dim);
+    line-height:1.5;
+    margin:0;
+  }
+
+  #replay{
+    position:absolute; top:28px; right:32px;
+    z-index:20;
+    background:rgba(255,255,255,0.04);
+    border:1px solid rgba(255,255,255,0.12);
+    color:var(--ink);
+    font-family:'JetBrains Mono',monospace;
+    font-size:11px;
+    letter-spacing:0.08em;
+    padding:9px 16px;
+    border-radius:100px;
+    cursor:pointer;
+    text-transform:uppercase;
+    transition:border-color 0.2s, background 0.2s;
+  }
+  #replay:hover{
+    border-color:var(--cyan);
+    background:rgba(94,234,212,0.08);
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    .node.active, .pulse.fire, #content.settle, #loader{ animation:none !important; transition:none !important; }
+  }
+
+  @media (max-width:640px){
+    .grid{ grid-template-columns:1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+
+  <div id="loader">
+    <svg id="net-svg" viewBox="0 0 680 420"></svg>
+    <div id="loader-label">initializing <b id="pct">0%</b></div>
+  </div>
+
+  <div id="content">
+    <p class="eyebrow">// signal settled</p>
+    <h1>Interfaces that <span>think</span><br>before they render.</h1>
+    <p class="lead">A page transition modeled on signal propagation — nodes fire, pulses travel the shortest path, and the layout resolves only once the network agrees. Press replay to watch it reason again.</p>
+
+    <div class="grid">
+      <div class="card"><span class="n">01</span><h3>Propagate</h3><p>Each node activates only after receiving signal from its parents.</p></div>
+      <div class="card"><span class="n">02</span><h3>Converge</h3><p>Pulses race along edges toward the output layer.</p></div>
+      <div class="card"><span class="n">03</span><h3>Resolve</h3><p>Once the network settles, the UI fades in — never before.</p></div>
+    </div>
+  </div>
+
+  <button id="replay">↻ Replay</button>
+
+</div>
+
+<script>
+(function(){
+  const svg = document.getElementById('net-svg');
+  const NS = 'http://www.w3.org/2000/svg';
+  const loader = document.getElementById('loader');
+  const content = document.getElementById('content');
+  const pctEl = document.getElementById('pct');
+  const replayBtn = document.getElementById('replay');
+
+  // Define a small layered network: 3 -> 4 -> 3 -> 1
+  const layers = [
+    [ {x:60,y:120}, {x:60,y:210}, {x:60,y:300} ],
+    [ {x:250,y:70}, {x:250,y:170}, {x:250,y:270}, {x:250,y:360} ],
+    [ {x:440,y:120}, {x:440,y:210}, {x:440,y:300} ],
+    [ {x:610,y:210} ]
+  ];
+
+  let edges = []; // {from:[l,i], to:[l,i], path, pulse}
+
+  function buildNet(){
+    svg.innerHTML = '';
+    edges = [];
+
+    // edges (connect consecutive layers)
+    for(let l=0; l<layers.length-1; l++){
+      layers[l].forEach((a,ai)=>{
+        layers[l+1].forEach((b,bi)=>{
+          const line = document.createElementNS(NS,'path');
+          const d = `M ${a.x} ${a.y} C ${(a.x+b.x)/2} ${a.y}, ${(a.x+b.x)/2} ${b.y}, ${b.x} ${b.y}`;
+          line.setAttribute('d', d);
+          line.setAttribute('class','edge');
+          svg.appendChild(line);
+
+          const pulse = document.createElementNS(NS,'path');
+          pulse.setAttribute('d', d);
+          pulse.setAttribute('class','pulse');
+          svg.appendChild(pulse);
+
+          edges.push({from:[l,ai], to:[l+1,bi], pulse});
+        });
+      });
+    }
+
+    // nodes drawn on top
+    layers.forEach((layer, li)=>{
+      layer.forEach((pos, ni)=>{
+        const c = document.createElementNS(NS,'circle');
+        c.setAttribute('cx', pos.x);
+        c.setAttribute('cy', pos.y);
+        c.setAttribute('r', 9);
+        c.setAttribute('class','node');
+        c.id = `node-${li}-${ni}`;
+        svg.appendChild(c);
+      });
+    });
+  }
+
+  function activateNode(l,i){
+    const el = document.getElementById(`node-${l}-${i}`);
+    if(el) el.classList.add('active');
+  }
+  function deactivateAll(){
+    svg.querySelectorAll('.node').forEach(n=>n.classList.remove('active'));
+    svg.querySelectorAll('.pulse').forEach(p=>p.classList.remove('fire'));
+  }
+
+  function fireEdgesInto(layerIndex){
+    edges.filter(e => e.to[0] === layerIndex).forEach(e=>{
+      e.pulse.classList.remove('fire');
+      void e.pulse.offsetWidth; // restart animation
+      e.pulse.classList.add('fire');
+    });
+  }
+
+  function runSequence(){
+    deactivateAll();
+    loader.classList.remove('leaving');
+    content.classList.remove('settle');
+    content.style.opacity = 0;
+    pctEl.textContent = '0%';
+
+    const totalLayers = layers.length;
+    let step = 0;
+
+    // activate layer 0 immediately
+    layers[0].forEach((_,i)=>activateNode(0,i));
+    pctEl.textContent = Math.round((1/totalLayers)*100) + '%';
+
+    const stepDelay = 620;
+
+    function next(){
+      step++;
+      if(step >= totalLayers){
+        // finished — transition to content
+        setTimeout(()=>{
+          loader.classList.add('leaving');
+          content.classList.add('settle');
+        }, 260);
+        return;
+      }
+      fireEdgesInto(step);
+      setTimeout(()=>{
+        layers[step].forEach((_,i)=>activateNode(step,i));
+        pctEl.textContent = Math.round(((step+1)/totalLayers)*100) + '%';
+        setTimeout(next, stepDelay);
+      }, 480);
+    }
+    setTimeout(next, stepDelay);
+  }
+
+  buildNet();
+  runSequence();
+
+  replayBtn.addEventListener('click', ()=>{
+    buildNet();
+    // small delay to let loader fade back in visually
+    loader.style.transition = 'none';
+    loader.classList.remove('leaving');
+    void loader.offsetWidth;
+    loader.style.transition = '';
+    runSequence();
+  });
+})();
+</script>
+
+</body>
+</html>
